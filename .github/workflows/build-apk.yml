@@ -38,17 +38,13 @@ jobs:
             "buildozer==1.5.0"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Show build configuration
+      - name: Show configuration
         run: |
           java -version
           buildozer --version
           grep -E '^(android.api|android.ndk|android.minapi|requirements)' buildozer.spec
 
-      - name: Clean previous build
-        run: |
-          buildozer android clean
-
-      - name: Build APK
+      - name: Build APK from fresh environment
         run: |
           buildozer -v android debug
 
