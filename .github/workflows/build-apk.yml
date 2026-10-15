@@ -68,6 +68,13 @@ jobs:
           echo "=== Project requirements.txt ==="
           cat requirements.txt
 
+      - name: Clean buildozer & python-for-android caches
+        run: |
+          echo "Cleaning local build caches to avoid stale / incompatible wheels"
+          rm -rf .buildozer
+          rm -rf .cache/python-for-android ~/.cache/python-for-android
+          "$HOME/.local/bin/buildozer" android clean || true
+
       - name: Build debug APK
         run: |
           buildozer -v android debug
