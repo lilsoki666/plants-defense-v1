@@ -2,19 +2,15 @@
 
 Offline Android tower-defense prototype built with Python and Kivy.
 
-## Build
-1. Push the project to the `main` branch or run the GitHub Actions workflow manually.
-2. Open **Actions** and select **Build Plant Defense APK**.
-3. Download the `plant-defense-debug-apk` artifact after the workflow succeeds.
+## Build APK with GitHub Actions
 
-## Dependency policy
-- Runtime dependencies are declared only in `buildozer.spec`.
-- `requirements.txt` is intentionally empty.
-- Python 3.14 is not pinned. The previous build log showed an Android `cp314` wheel being rejected by pip.
-- The workflow intentionally does not run `buildozer android clean` before initialization.
+1. Commit all files to the repository's `main` branch.
+2. Open the **Actions** tab.
+3. Select **Build Plant Defense APK** and run **Run workflow**, or push a commit to `main`.
+4. When the workflow succeeds, download the `plant-defense-debug-apk` artifact.
 
-## Current gameplay
-- Five lanes and nine columns.
-- Pea Shooter and Ice Plant.
-- Sun energy, projectile attacks, zombie waves, win/loss states, restart.
-- Graphics are currently canvas-drawn placeholders; custom sprite animations are future work.
+## Dependency note
+
+`buildozer.spec` uses `requirements = python3,kivy==2.3.1`. The Python recipe is intentionally not pinned to 3.11.5 because the current `python-for-android` checkout in the supplied logs uses `hostpython3` 3.14.2. The target `python3` recipe must match the host recipe. `requirements.txt` is intentionally empty to prevent unrelated packages from being installed.
+
+This project has not been confirmed by a successful Android build until GitHub Actions completes successfully.

@@ -1,3 +1,2 @@
-# Intentionally empty.
-# Android dependencies are declared only in buildozer.spec.
-# Do not add desktop-only or unrelated packages here.
+# Intentionally empty. Android Python dependencies are defined in buildozer.spec.
+# Do not add unrelated third-party packages here.
