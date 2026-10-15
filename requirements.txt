@@ -1,1 +1,3 @@
-
+# Plant Defense
+# Python dependencies are managed by buildozer.spec.
+# Keep this file free of third-party package requirements.
