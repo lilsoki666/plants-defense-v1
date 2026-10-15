@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout project
@@ -38,9 +38,19 @@ jobs:
             "buildozer==1.5.0"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Build Android APK
+      - name: Show build configuration
         run: |
-          buildozer android debug
+          java -version
+          buildozer --version
+          grep -E '^(android.api|android.ndk|android.minapi|requirements)' buildozer.spec
+
+      - name: Clean previous build
+        run: |
+          buildozer android clean
+
+      - name: Build APK
+        run: |
+          buildozer -v android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
