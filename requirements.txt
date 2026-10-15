@@ -1,0 +1,8 @@
+requests
+certifi
+chardet
+filetype
+idna
+six
+urllib3
+charset-normalizer
