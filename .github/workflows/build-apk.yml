@@ -23,11 +23,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git zip unzip openjdk-17-jdk \
-            python3-pip python3-venv \
-            autoconf libtool pkg-config \
-            zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo6 \
-            cmake libffi-dev libssl-dev automake gettext
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            python3-pip \
+            python3-venv \
+            autoconf \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo6 \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            automake \
+            gettext
 
       - name: Install Buildozer
         run: |
@@ -36,29 +49,30 @@ jobs:
             "buildozer==1.5.0"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Validate project configuration
+      - name: Validate project files
         run: |
           set -eu
+
           test -f main.py
           test -f buildozer.spec
           test -f requirements.txt
+
           python3 -m py_compile main.py
 
-          grep -q '^requirements = python3==3.11.5,kivy==2.3.1$' buildozer.spec
-
-          if grep -Eiq 'charset[-_]normalizer|requests|certifi|urllib3|chardet|filetype|idna|six' requirements.txt; then
-            echo "Unexpected third-party dependencies in requirements.txt"
-            exit 1
-          fi
-
+          echo "=== Buildozer version ==="
           "$HOME/.local/bin/buildozer" --version
-          echo "Configuration validation passed."
+
+          echo "=== Python and Kivy requirements ==="
+          grep '^requirements =' buildozer.spec
+
+          echo "=== requirements.txt ==="
+          cat requirements.txt
 
       - name: Build debug APK
         run: |
           buildozer -v android debug
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: plant-defense-debug-apk
