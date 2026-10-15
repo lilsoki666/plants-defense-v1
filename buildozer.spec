@@ -28,3 +28,6 @@ p4a.branch = develop
 
 log_level = 2
 warn_on_root = 1
+
+# Gunakan python-for-android versi develop
+p4a.branch = develop
