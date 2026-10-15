@@ -7,7 +7,7 @@ package.domain = org.plantdefense
 
 source.dir = .
 source.include_exts = py,png,jpg,jpeg,atlas,json,kv,wav,ogg,mp3,ttf
-version = 0.1.0
+version = 0.1.1
 
 requirements = python3,kivy==2.3.1
 
@@ -16,6 +16,7 @@ fullscreen = 1
 
 android.api = 35
 android.minapi = 23
+android.ndk = 25b
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 
