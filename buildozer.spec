@@ -13,7 +13,7 @@ version = 0.1.2
 # Dependensi aplikasi hanya Python dan Kivy.
 # Jangan tambahkan requests, certifi, chardet, urllib3,
 # filetype, idna, six, atau charset-normalizer.
-requirements = python3,kivy==2.3.1
+requirements = python3==3.11.4,kivy==2.3.1
 
 orientation = landscape
 fullscreen = 1
