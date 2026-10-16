@@ -240,53 +240,53 @@ class GameplayWidget(Widget):
                 self.daftar_peluru.remove(peluru)
             continue
 
-        # Check collision with zombies (same row)
-        for z in self.daftar_zombie[:]:
-            if getattr(z, 'baris', None) == getattr(peluru, 'baris', None) and peluru.collide_widget(z):
-                # Apply damage — adjust value per weapon
-                z.darah -= 50
-                if peluru.parent:
-                    self.remove_widget(peluru)
-                if peluru in self.daftar_peluru:
-                    self.daftar_peluru.remove(peluru)
-                break
-
-    # Update zombies
+            # Check collision with zombies (same row)
     for z in self.daftar_zombie[:]:
-        z.berjalan()
-        # Remove zombies that passed left edge
-        if z.x < -100:
-            if z.parent:
-                self.remove_widget(z)
-            if z in self.daftar_zombie:
-                self.daftar_zombie.remove(z)
-            continue
+        if getattr(z, 'baris', None) == getattr(peluru, 'baris', None) and peluru.collide_widget(z):
+            # Apply damage — adjust value per weapon
+            z.darah -= 50
+            if peluru.parent:
+                self.remove_widget(peluru)
+            if peluru in self.daftar_peluru:
+                self.daftar_peluru.remove(peluru)
+            break
 
-        # If zombie collides with a plant in same row, damage plant and stop moving (simple behavior)
-        for t in self.daftar_tanaman[:]:
-            if getattr(t, 'baris', None) == getattr(z, 'baris', None) and z.collide_widget(t):
-                # Damage plant
-                t.darah -= 10
-                # Damage zombie when plant is attacking (or when melee consumed)
-                # Optionally slow zombie or reduce attack speed here
-                if t.darah <= 0:
-                    if t.parent:
-                        self.remove_widget(t)
-                    if t in self.daftar_tanaman:
-                        self.daftar_tanaman.remove(t)
-                if z.darah <= 0:
-                    if z.parent:
-                        self.remove_widget(z)
-                    if z in self.daftar_zombie:
-                        self.daftar_zombie.remove(z)
-                break
+# Update zombies
+for z in self.daftar_zombie[:]:
+    z.berjalan()
+    # Remove zombies that passed left edge
+    if z.x < -100:
+        if z.parent:
+            self.remove_widget(z)
+        if z in self.daftar_zombie:
+            self.daftar_zombie.remove(z)
+        continue
 
-        # Remove dead zombies (from projectile damage above)
-        if z.darah <= 0:
-            if z.parent:
-                self.remove_widget(z)
-            if z in self.daftar_zombie:
-                self.daftar_zombie.remove(z)
+    # If zombie collides with a plant in same row, damage plant and stop moving (simple behavior)
+    for t in self.daftar_tanaman[:]:
+        if getattr(t, 'baris', None) == getattr(z, 'baris', None) and z.collide_widget(t):
+            # Damage plant
+            t.darah -= 10
+            # Damage zombie when plant is attacking (or when melee consumed)
+            # Optionally slow zombie or reduce attack speed here
+            if t.darah <= 0:
+                if t.parent:
+                    self.remove_widget(t)
+                if t in self.daftar_tanaman:
+                    self.daftar_tanaman.remove(t)
+            if z.darah <= 0:
+                if z.parent:
+                    self.remove_widget(z)
+                if z in self.daftar_zombie:
+                    self.daftar_zombie.remove(z)
+            break
 
-    # Update HUD (energy label already bound to poin_energi, but ensure it's refreshed)
-    self.update_hud()
+    # Remove dead zombies (from projectile damage above)
+    if z.darah <= 0:
+        if z.parent:
+            self.remove_widget(z)
+        if z in self.daftar_zombie:
+            self.daftar_zombie.remove(z)
+
+# Update HUD (energy label already bound to poin_energi, but ensure it's refreshed)
+self.update_hud()
