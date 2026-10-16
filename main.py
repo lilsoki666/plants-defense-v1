@@ -1,8 +1,7 @@
 
 # -*- coding: utf-8 -*-
-"""Plant Defense - offline tower-defense with pixel-art graphics."""
-import random
-import math
+"""Plant Defense: original offline pixel-art tower defense for Android."""
+import json, os, random, math
 from dataclasses import dataclass
 
 from kivy.app import App
@@ -11,18 +10,32 @@ from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle, Ellipse, Line, Triangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
+from kivy.uix.screenmanager import ScreenManager, Screen, FadeTransition
 
-GAME_TITLE = "PLANT DEFENSE"
-LANES, COLUMNS = 5, 9
-WIN_KILLS = 25
-START_SUN = 200
-SUN_INTERVAL = 6.5
-ZOMBIE_INTERVAL_START = 5.0
+TITLE = "PLANT DEFENSE"
+LANES, COLS = 5, 9
+SAVE_FILE = "plant_defense_save.json"
 
-COSTS = {"pea": 100, "ice": 125, "sun": 50, "wall": 75}
+PLANTS = {
+    "sprout": {"name": "Sprout Blaster", "cost": 100, "hp": 100, "cool": 1.05, "damage": 20, "color": (.25,.82,.28,1), "desc": "Penembak standar"},
+    "frost": {"name": "Frostbud", "cost": 125, "hp": 95, "cool": 1.55, "damage": 14, "color": (.35,.82,.98,1), "desc": "Memperlambat zombie"},
+    "bloom": {"name": "Sun Bloom", "cost": 50, "hp": 85, "cool": 7.0, "damage": 0, "color": (1,.75,.18,1), "desc": "Menghasilkan energi"},
+    "bark": {"name": "Bark Guard", "cost": 75, "hp": 330, "cool": 0, "damage": 0, "color": (.62,.39,.22,1), "desc": "Pertahanan kokoh"},
+    "burst": {"name": "Burst Berry", "cost": 150, "hp": 75, "cool": 99, "damage": 90, "color": (1,.35,.23,1), "desc": "Ledakan area sekali pakai"},
+    "twin": {"name": "Twin Sprout", "cost": 200, "hp": 105, "cool": 1.45, "damage": 14, "color": (.38,.88,.3,1), "desc": "Menembak dua proyektil"},
+    "snare": {"name": "Root Snare", "cost": 100, "hp": 90, "cool": 99, "damage": 8, "color": (.55,.66,.28,1), "desc": "Perangkap satu kali"},
+}
+
+ZOMBIES = {
+    "walker": {"hp": 100, "speed": .080, "damage": 18, "color": (.53,.63,.43,1), "reward": 15},
+    "runner": {"hp": 70, "speed": .135, "damage": 13, "color": (.68,.72,.43,1), "reward": 18},
+    "brute": {"hp": 210, "speed": .052, "damage": 30, "color": (.45,.50,.37,1), "reward": 25},
+    "helmet": {"hp": 155, "speed": .067, "damage": 20, "color": (.60,.65,.49,1), "reward": 22},
+}
 
 
 @dataclass
@@ -30,563 +43,666 @@ class Plant:
     row: int
     col: int
     kind: str
-    cooldown: float = 0.0
-    hp: float = 100.0
-    anim: float = 0.0
+    hp: float
+    cooldown: float = 0.
+    anim: float = 0.
 
 
 @dataclass
 class Zombie:
     row: int
     x: float
+    kind: str
     hp: float
     max_hp: float
     speed: float
-    attack_timer: float = 0.0
-    anim: float = 0.0
-    slow_timer: float = 0.0
+    attack: float = 0.
+    anim: float = 0.
+    slow: float = 0.
 
 
 @dataclass
-class Projectile:
+class Shot:
     row: int
     x: float
     y: float
     damage: float
     speed: float
-    kind: str = "pea"
+    kind: str = "sprout"
 
 
-class GameBoard(Widget):
-    """Game world rendered with Kivy canvas and pixel-style shapes."""
+@dataclass
+class SunDrop:
+    x: float
+    y: float
+    value: int = 25
+    ttl: float = 9.
+    phase: float = 0.
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.plants = []
-        self.zombies = []
-        self.projectiles = []
-        self.sun = START_SUN
+
+class PixelBoard(Widget):
+    """Game simulation and pixel-art arena."""
+
+    def __init__(self, app, **kw):
+        super().__init__(**kw)
+        self.app = app
+        self.plants, self.zombies = [], []
+        self.shots, self.suns = [], []
+        self.sun = 175
         self.kills = 0
-        self.elapsed = 0.0
-        self.spawn_timer = 2.5
-        self.sun_timer = SUN_INTERVAL
-        self.game_state = "playing"
-        self.selected_plant = "pea"
-        self.cell_w = self.cell_h = 1.0
-        self.board_x = self.board_y = 0.0
-        self.board_w = self.board_h = 1.0
-        self.bind(pos=self.redraw, size=self.redraw)
-        Clock.schedule_interval(self.update, 1.0 / 30.0)
+        self.elapsed = 0.
+        self.spawn = 2.2
+        self.sun_clock = 4.
+        self.wave = 1
+        self.state = "playing"
+        self.mode = "adventure"
+        self.level = 1
+        self.goal = 21
+        self.paused = False
+        self.selected = "sprout"
+        self.shovel = False
+        self.cellw = self.cellh = 1.
+        self.bx = self.by = 0.
+        self.bw = self.bh = 1.
+        self.bind(pos=self.draw, size=self.draw)
+        Clock.schedule_interval(self.tick, 1 / 30.)
 
-    def reset(self):
-        self.plants.clear()
-        self.zombies.clear()
-        self.projectiles.clear()
-        self.sun = START_SUN
+    def start(self, mode="adventure", level=1):
+        self.plants, self.zombies = [], []
+        self.shots, self.suns = [], []
+        self.sun = 175
         self.kills = 0
-        self.elapsed = 0.0
-        self.spawn_timer = 2.5
-        self.sun_timer = SUN_INTERVAL
-        self.game_state = "playing"
-        self.redraw()
-
-    def select_plant(self, kind):
-        self.selected_plant = kind
-
-    def plant_cost(self, kind):
-        return COSTS.get(kind, 100)
-
-    def board_geometry(self):
-        margin = dp(7)
-        self.board_x = self.x + margin
-        self.board_y = self.y + margin
-        self.board_w = max(1, self.width - margin * 2)
-        self.board_h = max(1, self.height - margin * 2)
-        self.cell_w = self.board_w / COLUMNS
-        self.cell_h = self.board_h / LANES
-
-    def on_touch_down(self, touch):
-        if self.game_state != "playing":
-            return super().on_touch_down(touch)
-        if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-
-        self.board_geometry()
-        bx = touch.x - self.board_x
-        by = touch.y - self.board_y
-
-        if bx < 0 or by < 0 or bx >= self.board_w or by >= self.board_h:
-            return super().on_touch_down(touch)
-
-        col = int(bx / self.cell_w)
-        row = LANES - 1 - int(by / self.cell_h)
-
-        if not (0 <= row < LANES and 0 <= col < COLUMNS):
-            return True
-        if any(p.row == row and p.col == col for p in self.plants):
-            return True
-
-        cost = self.plant_cost(self.selected_plant)
-        if self.sun < cost:
-            return True
-
-        self.sun -= cost
-        hp = 300.0 if self.selected_plant == "wall" else 100.0
-        self.plants.append(
-            Plant(row, col, self.selected_plant, hp=hp)
+        self.elapsed = 0.
+        self.spawn = 2.
+        self.sun_clock = 4.
+        self.wave = 1
+        self.state = "playing"
+        self.paused = False
+        self.mode = mode
+        self.level = level
+        self.goal = (18 + level * 3) if mode == "adventure" else (
+            10**9 if mode == "survival" else 12
         )
-        self.redraw()
+        self.selected = "sprout"
+        self.shovel = False
+        self.draw()
+
+    def geom(self):
+        pad = dp(5)
+        self.bx, self.by = self.x + pad, self.y + pad
+        self.bw = max(1, self.width - 2 * pad)
+        self.bh = max(1, self.height - 2 * pad)
+        self.cellw = self.bw / COLS
+        self.cellh = self.bh / LANES
+
+    def px(self, c):
+        return self.bx + (c + .5) * self.cellw
+
+    def py(self, r):
+        return self.by + (LANES - r - .5) * self.cellh
+
+    def touch_sun(self, x, y):
+        for s in self.suns[:]:
+            if (s.x - x)**2 + (s.y - y)**2 < dp(40)**2:
+                self.sun += s.value
+                self.suns.remove(s)
+                return True
+        return False
+
+    def on_touch_down(self, t):
+        if self.state != "playing" or self.paused:
+            return True
+        if not self.collide_point(*t.pos):
+            return super().on_touch_down(t)
+
+        self.geom()
+        if self.touch_sun(t.x, t.y):
+            self.draw()
+            self.app.refresh()
+            return True
+
+        bx, by = t.x - self.bx, t.y - self.by
+        if bx < 0 or by < 0 or bx >= self.bw or by >= self.bh:
+            return True
+
+        c = int(bx / self.cellw)
+        r = LANES - 1 - int(by / self.cellh)
+        existing = next((p for p in self.plants if p.row == r and p.col == c), None)
+
+        if self.shovel:
+            if existing:
+                self.plants.remove(existing)
+            self.shovel = False
+            self.app.set_status("Sekop digunakan.")
+            self.draw()
+            self.app.refresh()
+            return True
+
+        if existing:
+            return True
+
+        data = PLANTS[self.selected]
+        if self.sun < data["cost"]:
+            self.app.set_status("Energi belum cukup untuk unit ini.")
+            return True
+
+        self.sun -= data["cost"]
+        self.plants.append(Plant(r, c, self.selected, data["hp"]))
+        self.app.set_status(data["name"] + " ditempatkan.")
+        self.draw()
+        self.app.refresh()
         return True
 
-    def update(self, dt):
-        if self.game_state != "playing":
-            self.redraw()
+    def spawn_zombie(self):
+        row = random.randrange(LANES)
+        if self.elapsed < 20:
+            kind = "walker"
+        else:
+            roll = random.random()
+            kind = (
+                "runner" if roll < .22 else
+                "brute" if roll < .40 else
+                "helmet" if roll < .60 else "walker"
+            )
+
+        d = ZOMBIES[kind]
+        scale = 1 + max(0, self.level - 1) * .10 + self.elapsed * .0015
+        hp = d["hp"] * scale
+        self.zombies.append(Zombie(
+            row, self.bx + self.bw + self.cellw * .4,
+            kind, hp, hp, self.cellw * d["speed"]
+        ))
+
+    def tick(self, dt):
+        if self.state != "playing" or self.paused:
+            self.draw()
             return
 
-        dt = min(dt, 0.06)
+        dt = min(dt, .05)
         self.elapsed += dt
-        self.spawn_timer -= dt
-        self.sun_timer -= dt
+        self.spawn -= dt
+        self.sun_clock -= dt
+        interval = max(1.35, 5.2 - self.elapsed * .012 - self.level * .05)
 
-        # Passive energy generation.
-        if self.sun_timer <= 0:
-            self.sun += 25
-            self.sun_timer = SUN_INTERVAL
-
-        # Waves gradually become more difficult.
-        spawn_interval = max(1.65, ZOMBIE_INTERVAL_START - self.elapsed / 115.0)
-        if self.spawn_timer <= 0:
+        if self.spawn <= 0:
             self.spawn_zombie()
-            self.spawn_timer = spawn_interval * random.uniform(0.82, 1.18)
+            self.spawn = interval * random.uniform(.78, 1.18)
+            if self.kills and self.kills % 8 == 0:
+                self.wave += 1
 
-        # Plant behavior.
+        if self.sun_clock <= 0:
+            self.suns.append(SunDrop(
+                random.uniform(self.bx + self.cellw, self.bx + self.bw - self.cellw),
+                self.by + self.bh * .72
+            ))
+            self.sun_clock = random.uniform(7, 10)
+
+        for s in self.suns[:]:
+            s.ttl -= dt
+            s.phase += dt
+            if s.ttl <= 0:
+                self.suns.remove(s)
+
         for p in self.plants[:]:
             p.anim += dt
             p.cooldown -= dt
 
-            if p.kind == "sun":
+            if p.kind == "bloom":
                 if p.cooldown <= 0:
-                    self.sun += 25
-                    p.cooldown = 7.0
+                    self.suns.append(SunDrop(self.px(p.col), self.py(p.row) + self.cellh * .28))
+                    p.cooldown = PLANTS[p.kind]["cool"]
                 continue
 
-            if p.kind == "wall":
+            if p.kind == "bark":
                 continue
 
-            targets = [
-                z for z in self.zombies
-                if z.row == p.row and z.x > self.plant_x(p.col)
-            ]
-
-            if targets and p.cooldown <= 0:
-                px = self.plant_x(p.col) + self.cell_w * 0.24
-                py = self.lane_y(p.row) + self.cell_h * 0.12
-
-                if p.kind == "ice":
-                    self.projectiles.append(
-                        Projectile(p.row, px, py, 14, self.cell_w * 2.0, "ice")
-                    )
-                    p.cooldown = 1.55
-                else:
-                    self.projectiles.append(
-                        Projectile(p.row, px, py, 20, self.cell_w * 2.65, "pea")
-                    )
-                    p.cooldown = 1.05
-
-        # Projectile movement and collisions.
-        for shot in self.projectiles[:]:
-            shot.x += shot.speed * dt
-            hit = next(
-                (
+            if p.kind == "burst":
+                target = next((
                     z for z in self.zombies
-                    if z.row == shot.row
-                    and abs(z.x - shot.x) < self.cell_w * 0.23
-                ),
-                None,
-            )
+                    if z.row == p.row and abs(z.x - self.px(p.col)) < self.cellw * 1.25
+                ), None)
+                if target:
+                    for z in self.zombies:
+                        if abs(z.row - p.row) <= 1 and abs(z.x - self.px(p.col)) < self.cellw * 1.6:
+                            z.hp -= PLANTS["burst"]["damage"]
+                    self.plants.remove(p)
+                    continue
 
+            if p.kind == "snare":
+                target = next((
+                    z for z in self.zombies
+                    if z.row == p.row and abs(z.x - self.px(p.col)) < self.cellw * .65
+                ), None)
+                if target:
+                    target.hp -= 80
+                    target.slow = 4.
+                    self.plants.remove(p)
+                    continue
+
+            targets = [z for z in self.zombies if z.row == p.row and z.x > self.px(p.col)]
+            if targets and p.cooldown <= 0:
+                y = self.py(p.row) + self.cellh * .12
+                x = self.px(p.col) + self.cellw * .2
+                if p.kind == "twin":
+                    self.shots.append(Shot(p.row, x, y, 14, self.cellw * 2.6, "twin"))
+                    self.shots.append(Shot(p.row, x, y + self.cellh * .08, 14, self.cellw * 2.6, "twin"))
+                else:
+                    self.shots.append(Shot(
+                        p.row, x, y, PLANTS[p.kind]["damage"],
+                        self.cellw * (2.1 if p.kind == "frost" else 2.7), p.kind
+                    ))
+                p.cooldown = PLANTS[p.kind]["cool"]
+
+        for sh in self.shots[:]:
+            sh.x += sh.speed * dt
+            hit = next((
+                z for z in self.zombies
+                if z.row == sh.row and abs(z.x - sh.x) < self.cellw * .22
+            ), None)
             if hit:
-                hit.hp -= shot.damage
-                if shot.kind == "ice":
-                    hit.speed = min(hit.speed, self.cell_w * 0.07)
-                    hit.slow_timer = 2.8
-                self.projectiles.remove(shot)
-            elif shot.x > self.board_x + self.board_w + self.cell_w:
-                self.projectiles.remove(shot)
+                hit.hp -= sh.damage
+                if sh.kind == "frost":
+                    hit.slow = max(hit.slow, 3.)
+                self.shots.remove(sh)
+            elif sh.x > self.bx + self.bw + self.cellw:
+                self.shots.remove(sh)
 
-        # Zombies attack plants or advance.
         for z in self.zombies[:]:
             z.anim += dt
-            if z.slow_timer > 0:
-                z.slow_timer -= dt
+            z.slow = max(0, z.slow - dt)
+            block = next((
+                p for p in self.plants
+                if p.row == z.row and abs(z.x - self.px(p.col)) < self.cellw * .34
+            ), None)
 
-            blocker = next(
-                (
-                    p for p in self.plants
-                    if p.row == z.row
-                    and abs(z.x - self.plant_x(p.col)) < self.cell_w * 0.34
-                ),
-                None,
-            )
-
-            if blocker:
-                z.attack_timer -= dt
-                if z.attack_timer <= 0:
-                    blocker.hp -= 12 if blocker.kind == "wall" else 20
-                    z.attack_timer = 0.72
-                    if blocker.hp <= 0 and blocker in self.plants:
-                        self.plants.remove(blocker)
+            if block:
+                z.attack -= dt
+                if z.attack <= 0:
+                    block.hp -= ZOMBIES[z.kind]["damage"]
+                    z.attack = .8
+                    if block.hp <= 0 and block in self.plants:
+                        self.plants.remove(block)
             else:
-                z.x -= z.speed * (0.48 if z.slow_timer > 0 else 1.0) * dt
+                z.x -= z.speed * (.48 if z.slow > 0 else 1) * dt
 
             if z.hp <= 0:
                 self.zombies.remove(z)
                 self.kills += 1
-                self.sun += 15
+                self.suns.append(SunDrop(z.x, self.py(z.row), ZOMBIES[z.kind]["reward"]))
                 continue
 
-            if z.x < self.board_x - self.cell_w * 0.28:
-                self.game_state = "lost"
+            if z.x < self.bx - self.cellw * .2:
+                self.state = "lost"
 
-        if self.kills >= WIN_KILLS:
-            self.game_state = "won"
+        if self.mode != "survival" and self.kills >= self.goal and not self.zombies:
+            self.state = "won"
+            self.app.on_level_won(self.mode, self.level)
 
-        self.redraw()
+        self.draw()
+        self.app.refresh()
 
-    def spawn_zombie(self):
-        row = random.randrange(LANES)
-        hp = random.choice([78.0, 95.0, 115.0])
-        hp += min(65, self.elapsed * 0.16)
-        speed = self.cell_w * random.uniform(0.065, 0.095)
-        self.zombies.append(
-            Zombie(
-                row,
-                self.board_x + self.board_w + self.cell_w * 0.35,
-                hp,
-                hp,
-                speed,
-            )
-        )
+    def diamond(self, cx, cy, hw, hh, base):
+        Color(*base)
+        Triangle(points=[cx, cy+hh, cx-hw, cy, cx, cy-hh])
+        Color(min(1,base[0]*1.12), min(1,base[1]*1.12), min(1,base[2]*1.12), 1)
+        Triangle(points=[cx, cy+hh, cx+hw, cy, cx, cy-hh])
+        Color(.38, .58, .30, .65)
+        Line(points=[cx,cy+hh,cx+hw,cy,cx,cy-hh,cx-hw,cy,cx,cy+hh],width=.65)
 
-    def plant_x(self, col):
-        return self.board_x + (col + 0.5) * self.cell_w
+    def draw_plant(self, p, cx, cy, s):
+        bob = abs(math.sin(p.anim * 4)) * s * .025
+        k = p.kind
+        Color(.04,.08,.03,.35)
+        Ellipse(pos=(cx-s*.31,cy-s*.28),size=(s*.62,s*.16))
 
-    def lane_y(self, row):
-        return self.board_y + (LANES - row - 0.5) * self.cell_h
-
-    def diamond(self, cx, cy, hw, hh, colors):
-        """Draw a diamond tile with three shaded faces."""
-        top = (cx, cy + hh)
-        right = (cx + hw, cy)
-        bottom = (cx, cy - hh)
-        left = (cx - hw, cy)
-
-        Color(*colors[0])
-        Triangle(points=[*top, *left, *bottom])
-        Color(*colors[1])
-        Triangle(points=[*top, *right, *bottom])
-        Color(*colors[2])
-        Line(points=[*top, *right, *bottom, *left, *top], width=0.8)
-
-    def pixel_plant(self, p, cx, cy, s):
-        """Draw a small blocky character without external image assets."""
-        bob = abs(math.sin(p.anim * 4.0)) * s * 0.035
-
-        if p.kind == "sun":
-            Color(0.98, 0.72, 0.15, 1)
-            Rectangle(pos=(cx-s*.20, cy+s*.30+bob), size=(s*.40, s*.40))
-            Color(1.0, 0.9, 0.35, 1)
-            Rectangle(pos=(cx-s*.11, cy+s*.39+bob), size=(s*.22, s*.22))
-            Color(0.18, 0.62, 0.25, 1)
-            Rectangle(pos=(cx-s*.07, cy-s*.27), size=(s*.14, s*.45))
-            Color(0.27, 0.76, 0.29, 1)
-            Rectangle(pos=(cx-s*.31, cy-s*.08), size=(s*.25, s*.12))
+        if k == "bark":
+            Color(.36,.22,.12,1)
+            Rectangle(pos=(cx-s*.25,cy-s*.28),size=(s*.5,s*.58))
+            Color(.62,.42,.23,1)
+            Rectangle(pos=(cx-s*.19,cy+s*.01),size=(s*.38,s*.20))
+            Color(.13,.1,.07,1)
+            Rectangle(pos=(cx-s*.13,cy-s*.02),size=(s*.06,s*.06))
+            Rectangle(pos=(cx+s*.06,cy-s*.02),size=(s*.06,s*.06))
             return
 
-        if p.kind == "wall":
-            Color(0.48, 0.31, 0.19, 1)
-            Rectangle(pos=(cx-s*.27, cy-s*.27), size=(s*.54, s*.60))
-            Color(0.68, 0.48, 0.28, 1)
-            Rectangle(pos=(cx-s*.22, cy+s*.03), size=(s*.44, s*.22))
-            Color(0.25, 0.18, 0.12, 1)
-            Rectangle(pos=(cx-s*.14, cy-s*.04), size=(s*.07, s*.07))
-            Rectangle(pos=(cx+s*.07, cy-s*.04), size=(s*.07, s*.07))
+        if k == "bloom":
+            for a in range(8):
+                ang = a * math.pi / 4
+                Color(1,.68,.12,1)
+                Rectangle(pos=(cx+math.cos(ang)*s*.15-s*.07,
+                               cy+s*.27+bob+math.sin(ang)*s*.15-s*.07),
+                          size=(s*.14,s*.14))
+            Color(1,.88,.25,1)
+            Rectangle(pos=(cx-s*.12,cy+s*.20+bob),size=(s*.24,s*.24))
+            Color(.18,.62,.22,1)
+            Rectangle(pos=(cx-s*.055,cy-s*.25),size=(s*.11,s*.49))
             return
 
-        Color(0.14, 0.48, 0.20, 1)
-        Rectangle(pos=(cx-s*.06, cy-s*.30), size=(s*.12, s*.34))
-        Color(0.20, 0.68, 0.27, 1)
-        Rectangle(pos=(cx-s*.30, cy-s*.20), size=(s*.22, s*.10))
-        Rectangle(pos=(cx+s*.08, cy-s*.14), size=(s*.22, s*.10))
+        Color(.12,.5,.19,1)
+        Rectangle(pos=(cx-s*.055,cy-s*.27),size=(s*.11,s*.35))
+        Rectangle(pos=(cx-s*.29,cy-s*.15),size=(s*.23,s*.1))
+        Rectangle(pos=(cx+s*.06,cy-s*.10),size=(s*.22,s*.1))
+        col = PLANTS[k]["color"]
+        Color(*col)
+        Rectangle(pos=(cx-s*.23,cy+s*.02+bob),size=(s*.46,s*.39))
+        Color(min(1,col[0]+.22),min(1,col[1]+.18),min(1,col[2]+.1),1)
+        Rectangle(pos=(cx-s*.15,cy+s*.22+bob),size=(s*.15,s*.12))
+        Color(.06,.15,.08,1)
+        Rectangle(pos=(cx-s*.11,cy+s*.14+bob),size=(s*.055,s*.07))
+        Rectangle(pos=(cx+s*.065,cy+s*.14+bob),size=(s*.055,s*.07))
+        if k in ("sprout","twin"):
+            Color(.13,.48,.16,1)
+            Rectangle(pos=(cx+s*.15,cy+s*.10+bob),size=(s*.2,s*.14))
+        if k == "burst":
+            Color(1,.86,.32,1)
+            Rectangle(pos=(cx-s*.07,cy+s*.06+bob),size=(s*.14,s*.12))
+        if k == "snare":
+            Color(.36,.44,.17,1)
+            Rectangle(pos=(cx-s*.24,cy-s*.04),size=(s*.48,s*.10))
 
-        if p.kind == "ice":
-            Color(0.25, 0.70, 0.91, 1)
-            Rectangle(pos=(cx-s*.23, cy+s*.03+bob), size=(s*.46, s*.39))
-            Color(0.63, 0.92, 1.0, 1)
-            Rectangle(pos=(cx-s*.15, cy+s*.17+bob), size=(s*.16, s*.13))
-            Color(0.06, 0.28, 0.47, 1)
-            Rectangle(pos=(cx-s*.12, cy+s*.13+bob), size=(s*.06, s*.07))
-            Rectangle(pos=(cx+s*.08, cy+s*.13+bob), size=(s*.06, s*.07))
-        else:
-            Color(0.21, 0.70, 0.26, 1)
-            Rectangle(pos=(cx-s*.23, cy+s*.03+bob), size=(s*.46, s*.39))
-            Color(0.35, 0.88, 0.31, 1)
-            Rectangle(pos=(cx-s*.15, cy+s*.23+bob), size=(s*.15, s*.12))
-            Color(0.08, 0.28, 0.12, 1)
-            Rectangle(pos=(cx-s*.12, cy+s*.15+bob), size=(s*.06, s*.07))
-            Rectangle(pos=(cx+s*.08, cy+s*.15+bob), size=(s*.06, s*.07))
-            Color(0.11, 0.43, 0.17, 1)
-            Rectangle(pos=(cx+s*.17, cy+s*.10+bob), size=(s*.18, s*.14))
+    def draw_zombie(self, z, cx, cy, s):
+        walk = math.sin(z.anim * 7) * s * .035
+        col = ZOMBIES[z.kind]["color"]
+        Color(.03,.04,.025,.35)
+        Ellipse(pos=(cx-s*.31,cy-s*.28),size=(s*.62,s*.14))
+        Color(.25,.28,.23,1)
+        Rectangle(pos=(cx-s*.18+walk,cy-s*.27),size=(s*.14,s*.27))
+        Rectangle(pos=(cx+s*.04-walk,cy-s*.27),size=(s*.14,s*.27))
+        Color(*col)
+        Rectangle(pos=(cx-s*.22,cy-s*.02),size=(s*.44,s*.43))
+        Rectangle(pos=(cx-s*.19,cy+s*.22),size=(s*.38,s*.29))
+        Color(.22,.27,.20,1)
+        Rectangle(pos=(cx-s*.30,cy+s*.02),size=(s*.11,s*.24))
+        Rectangle(pos=(cx+s*.19,cy+s*.02),size=(s*.11,s*.24))
+        Color(.91,.91,.65,1)
+        Rectangle(pos=(cx-s*.12,cy+s*.34),size=(s*.09,s*.08))
+        Rectangle(pos=(cx+s*.04,cy+s*.34),size=(s*.09,s*.08))
+        Color(.07,.08,.05,1)
+        Rectangle(pos=(cx-s*.09,cy+s*.36),size=(s*.04,s*.04))
+        Rectangle(pos=(cx+s*.07,cy+s*.36),size=(s*.04,s*.04))
+        if z.kind == "helmet":
+            Color(.58,.65,.67,1)
+            Rectangle(pos=(cx-s*.22,cy+s*.45),size=(s*.44,s*.12))
+            Rectangle(pos=(cx-s*.18,cy+s*.55),size=(s*.36,s*.06))
+        if z.kind == "brute":
+            Color(.25,.28,.21,1)
+            Rectangle(pos=(cx-s*.28,cy+s*.02),size=(s*.56,s*.22))
+        bw, bh = s*.64, max(dp(2),s*.04)
+        Color(.06,.07,.06,1)
+        Rectangle(pos=(cx-bw/2,cy+s*.62),size=(bw,bh))
+        Color(.85,.19,.14,1)
+        Rectangle(pos=(cx-bw/2,cy+s*.62),size=(bw*max(0,z.hp/z.max_hp),bh))
 
-    def pixel_zombie(self, z, cx, cy, s):
-        walk = int(math.sin(z.anim * 7.0) * s * 0.035)
-
-        Color(0.03, 0.08, 0.05, 0.38)
-        Ellipse(pos=(cx-s*.32, cy-s*.30), size=(s*.64, s*.16))
-
-        Color(0.25, 0.32, 0.28, 1)
-        Rectangle(pos=(cx-s*.20+walk, cy-s*.28), size=(s*.15, s*.28))
-        Rectangle(pos=(cx+s*.05-walk, cy-s*.28), size=(s*.15, s*.28))
-
-        Color(0.36, 0.47, 0.36, 1)
-        Rectangle(pos=(cx-s*.24, cy-s*.01), size=(s*.48, s*.43))
-        Color(0.48, 0.58, 0.42, 1)
-        Rectangle(pos=(cx-s*.20, cy+s*.22), size=(s*.40, s*.17))
-
-        Color(0.20, 0.31, 0.25, 1)
-        Rectangle(pos=(cx-s*.31, cy+s*.02), size=(s*.12, s*.25))
-        Rectangle(pos=(cx+s*.19, cy+s*.02), size=(s*.12, s*.25))
-
-        Color(0.55, 0.65, 0.47, 1)
-        Rectangle(pos=(cx-s*.20, cy+s*.23), size=(s*.40, s*.27))
-        Color(0.08, 0.10, 0.08, 1)
-        Rectangle(pos=(cx-s*.11, cy+s*.34), size=(s*.07, s*.07))
-        Rectangle(pos=(cx+s*.06, cy+s*.34), size=(s*.07, s*.07))
-        Color(0.32, 0.12, 0.12, 1)
-        Rectangle(pos=(cx-s*.06, cy+s*.24), size=(s*.13, s*.04))
-
-        bw = s * .65
-        bh = max(dp(2), s * .045)
-        bx, by = cx - bw/2, cy + s*.60
-        Color(0.10, 0.12, 0.10, 1)
-        Rectangle(pos=(bx, by), size=(bw, bh))
-        Color(0.88, 0.20, 0.16, 1)
-        Rectangle(
-            pos=(bx, by),
-            size=(bw * max(0, min(1, z.hp/z.max_hp)), bh),
-        )
-
-    def redraw(self, *_args):
-        self.board_geometry()
+    def draw(self, *_):
+        self.geom()
         self.canvas.clear()
-
         with self.canvas:
-            Color(0.035, 0.075, 0.085, 1)
-            Rectangle(pos=self.pos, size=self.size)
-
-            # Pixelated distant landscape.
-            Color(0.07, 0.16, 0.15, 1)
-            for i in range(12):
-                Rectangle(
-                    pos=(self.x+i*self.width/11,
-                         self.y+self.height*.86+(i%3)*dp(3)),
-                    size=(self.width/14, dp(3)),
-                )
-
-            Color(0.015, 0.04, 0.025, 0.40)
-            Rectangle(pos=(self.board_x, self.board_y),
-                      size=(self.board_w, self.board_h))
-
-            # Diamond tiles give the field an isometric-inspired look.
-            for row in range(LANES):
-                for col in range(COLUMNS):
-                    cx = self.board_x + (col+.5)*self.cell_w
-                    cy = self.board_y + (row+.5)*self.cell_h
-                    hw, hh = self.cell_w*.51, self.cell_h*.49
-                    if (row+col) % 2 == 0:
-                        shades = [
-                            (.16,.40,.22,1),
-                            (.22,.49,.26,1),
-                            (.10,.30,.16,1),
-                        ]
-                    else:
-                        shades = [
-                            (.13,.34,.19,1),
-                            (.19,.43,.23,1),
-                            (.09,.27,.14,1),
-                        ]
-                    self.diamond(cx, cy, hw, hh, shades)
-                    Color(.35,.57,.27,.45)
-                    Rectangle(
-                        pos=(cx-hw*.45, cy-hh*.18),
-                        size=(max(1,hw*.10), max(1,hh*.09)),
-                    )
-
-            Color(.75,.88,.62,.18)
-            for row in range(1, LANES):
-                y = self.board_y + row*self.cell_h
-                Line(points=[self.board_x,y,
-                             self.board_x+self.board_w,y], width=.7)
-
+            Color(.025,.06,.065,1)
+            Rectangle(pos=self.pos,size=self.size)
+            Color(.07,.17,.12,1)
+            Rectangle(pos=(self.bx,self.by),size=(self.bw,self.bh))
+            for r in range(LANES):
+                for c in range(COLS):
+                    cx=self.bx+(c+.5)*self.cellw
+                    cy=self.by+(r+.5)*self.cellh
+                    base=(.13,.34,.18,1) if (r+c)%2 else (.17,.41,.22,1)
+                    self.diamond(cx,cy,self.cellw*.51,self.cellh*.50,base)
             for p in self.plants:
-                cx, cy = self.plant_x(p.col), self.lane_y(p.row)
-                s = min(self.cell_w*.76, self.cell_h*.95)
-                Color(.02,.05,.02,.35)
-                Ellipse(pos=(cx-s*.34,cy-s*.27),size=(s*.68,s*.18))
-                self.pixel_plant(p,cx,cy,s)
-
-                max_hp = 300 if p.kind == "wall" else 100
-                if p.hp < max_hp:
-                    bw, bh = s*.62, max(dp(2),s*.04)
-                    by = cy-s*.39
-                    Color(.08,.09,.08,1)
-                    Rectangle(pos=(cx-bw/2,by),size=(bw,bh))
-                    Color(.94,.64,.16,1)
-                    Rectangle(
-                        pos=(cx-bw/2,by),
-                        size=(bw*max(0,p.hp/max_hp),bh),
-                    )
-
-            for shot in self.projectiles:
-                r = max(dp(3), self.cell_h*.07)
-                if shot.kind == "ice":
-                    Color(.55,.91,1,1)
-                    Rectangle(pos=(shot.x-r,shot.y-r),size=(r*2,r*2))
-                    Color(.85,.98,1,1)
-                    Rectangle(pos=(shot.x-r*.35,shot.y-r*.35),
-                              size=(r*.7,r*.7))
-                else:
-                    Color(.58,.94,.25,1)
-                    Rectangle(pos=(shot.x-r,shot.y-r),size=(r*2,r*2))
-                    Color(.82,1,.48,1)
-                    Rectangle(pos=(shot.x-r*.35,shot.y-r*.35),
-                              size=(r*.7,r*.7))
-
+                self.draw_plant(p,self.px(p.col),self.py(p.row),
+                                min(self.cellw*.74,self.cellh*.88))
+            for sh in self.shots:
+                rad=max(dp(3),self.cellh*.065)
+                Color((.48,.9,1,1) if sh.kind=="frost" else (.65,1,.25,1))
+                Rectangle(pos=(sh.x-rad,sh.y-rad),size=(rad*2,rad*2))
             for z in self.zombies:
-                self.pixel_zombie(
-                    z, z.x, self.lane_y(z.row),
-                    min(self.cell_w*.76,self.cell_h*.88),
-                )
-
-            Color(.62,.82,.43,.85)
-            Line(rectangle=(self.board_x,self.board_y,
-                            self.board_w,self.board_h),width=1.2)
-
-            if self.game_state in ("won","lost"):
-                Color(.015,.025,.025,.78)
+                self.draw_zombie(z,z.x,self.py(z.row),
+                                 min(self.cellw*.72,self.cellh*.84))
+            for s in self.suns:
+                pulse=abs(math.sin(s.phase*3))*dp(2)
+                Color(1,.76,.18,1)
+                Ellipse(pos=(s.x-dp(10)-pulse,s.y-dp(10)-pulse),
+                        size=(dp(20)+pulse*2,dp(20)+pulse*2))
+                Color(1,.94,.53,1)
+                Ellipse(pos=(s.x-dp(4),s.y-dp(4)),size=(dp(8),dp(8)))
+            Color(.64,.85,.48,.85)
+            Line(rectangle=(self.bx,self.by,self.bw,self.bh),width=1.1)
+            if self.paused or self.state in ("won","lost"):
+                Color(.015,.025,.02,.72)
                 Rectangle(pos=self.pos,size=self.size)
 
 
 class PlantDefenseApp(App):
     def build(self):
-        self.title = GAME_TITLE
-        Window.clearcolor = (.035,.075,.08,1)
-        root = BoxLayout(
-            orientation="vertical", padding=dp(7), spacing=dp(5)
-        )
+        self.title=TITLE
+        Window.clearcolor=(.025,.06,.065,1)
+        self.save_path=os.path.join(self.user_data_dir,SAVE_FILE)
+        self.progress={"level":1,"best_survival":0,"sound":True}
+        self.load_progress()
+        self.sm=ScreenManager(transition=FadeTransition(duration=.15))
+        self.make_menu()
+        self.make_game()
+        self.make_codex()
+        self.show_menu()
+        return self.sm
 
-        header = BoxLayout(
-            orientation="horizontal", size_hint_y=None,
-            height=dp(40), spacing=dp(7),
-        )
-        self.title_label = Label(
-            text="[b]PLANT DEFENSE[/b]", markup=True,
-            font_size="19sp", color=(.78,1,.69,1), halign="left",
-        )
-        self.sun_label = Label(
-            text="SUN 200", font_size="15sp", color=(1,.82,.28,1),
-            size_hint_x=None, width=dp(85),
-        )
-        self.score_label = Label(
-            text="KILLS 0/25", font_size="14sp",
-            color=(.92,.96,.89,1), size_hint_x=None, width=dp(105),
-        )
-        header.add_widget(self.title_label)
-        header.add_widget(self.sun_label)
-        header.add_widget(self.score_label)
+    def load_progress(self):
+        try:
+            with open(self.save_path,"r",encoding="utf-8") as f:
+                self.progress.update(json.load(f))
+        except Exception:
+            pass
+
+    def save_progress(self):
+        try:
+            os.makedirs(os.path.dirname(self.save_path),exist_ok=True)
+            with open(self.save_path,"w",encoding="utf-8") as f:
+                json.dump(self.progress,f)
+        except Exception:
+            pass
+
+    def button(self,text,cb,color=(.15,.37,.24,1),height=dp(46)):
+        b=Button(text=text,size_hint_y=None,height=height,font_size="15sp",
+                 bold=True,background_normal="",background_color=color,
+                 color=(.94,1,.88,1))
+        b.bind(on_release=lambda *_:cb())
+        return b
+
+    def make_menu(self):
+        s=Screen(name="menu")
+        root=BoxLayout(orientation="vertical",padding=dp(18),spacing=dp(10))
+        root.add_widget(Widget(size_hint_y=.15))
+        root.add_widget(Label(text="[b]PLANT DEFENSE[/b]",markup=True,
+                              font_size="32sp",color=(.72,1,.57,1),
+                              size_hint_y=None,height=dp(55)))
+        root.add_widget(Label(text="PIXEL GARDEN • OFFLINE STRATEGY",
+                              font_size="12sp",color=(.65,.82,.68,1),
+                              size_hint_y=None,height=dp(26)))
+        root.add_widget(Widget(size_hint_y=.06))
+        root.add_widget(self.button("PETUALANGAN",self.show_levels,(.16,.45,.23,1)))
+        root.add_widget(self.button("SURVIVAL",lambda:self.start_game("survival",1),(.14,.37,.48,1)))
+        root.add_widget(self.button("TANTANGAN",lambda:self.start_game("challenge",1),(.49,.33,.13,1)))
+        root.add_widget(self.button("ENSIKLOPEDIA UNIT",self.show_codex,(.29,.30,.20,1)))
+        root.add_widget(self.button("PENGATURAN",self.show_settings,(.25,.28,.27,1)))
+        root.add_widget(Label(text="Versi 0.3 • Dunia taman orisinal",
+                              font_size="10sp",color=(.45,.60,.49,1),
+                              size_hint_y=None,height=dp(24)))
+        root.add_widget(Widget(size_hint_y=.12))
+        s.add_widget(root)
+        self.sm.add_widget(s)
+
+    def make_game(self):
+        self.game_screen=Screen(name="game")
+        root=BoxLayout(orientation="vertical",padding=dp(5),spacing=dp(4))
+        header=BoxLayout(size_hint_y=None,height=dp(34),spacing=dp(5))
+        self.hud=Label(text="SUN 175",font_size="14sp",color=(1,.82,.29,1))
+        self.levelhud=Label(text="LEVEL 1 • 0/21",font_size="13sp",color=(.84,.97,.81,1))
+        header.add_widget(self.hud)
+        header.add_widget(self.levelhud)
+        header.add_widget(self.button("Ⅱ",self.pause_game,(.29,.34,.26,1),dp(34)))
+        header.add_widget(self.button("MENU",self.show_menu,(.42,.22,.18,1),dp(34)))
         root.add_widget(header)
 
-        toolbar = BoxLayout(
-            orientation="horizontal", size_hint_y=None,
-            height=dp(46), spacing=dp(4),
-        )
-        self.buttons = {}
-        options = [
-            ("pea","PEA 100",(.15,.48,.22,1)),
-            ("ice","ICE 125",(.10,.38,.55,1)),
-            ("sun","SUN 50",(.55,.39,.08,1)),
-            ("wall","WALL 75",(.40,.27,.17,1)),
-        ]
-        for kind, label, color in options:
-            b = Button(
-                text=label, font_size="11sp",
-                background_normal="", background_color=color,
-            )
-            b.bind(on_release=lambda _b,k=kind:self.choose_plant(k))
-            toolbar.add_widget(b)
-            self.buttons[kind] = b
+        self.cards=GridLayout(cols=7,spacing=dp(3),size_hint_y=None,height=dp(58))
+        self.card_buttons={}
+        for k,d in PLANTS.items():
+            b=Button(text="{}\n{}".format(d["name"].split()[0],d["cost"]),
+                     font_size="10sp",background_normal="",background_color=d["color"])
+            b.bind(on_release=lambda _b,key=k:self.select_plant(key))
+            self.cards.add_widget(b)
+            self.card_buttons[k]=b
+        root.add_widget(self.cards)
 
-        self.restart_button = Button(
-            text="RESTART", size_hint_x=None, width=dp(83),
-            font_size="11sp", background_normal="",
-            background_color=(.52,.20,.17,1),
-        )
-        self.restart_button.bind(on_release=lambda *_:self.restart_game())
-        toolbar.add_widget(self.restart_button)
-        root.add_widget(toolbar)
-
-        self.board = GameBoard()
+        tools=BoxLayout(size_hint_y=None,height=dp(31),spacing=dp(4))
+        tools.add_widget(self.button("SEKOP",self.toggle_shovel,(.36,.27,.18,1),dp(31)))
+        self.status=Label(text="Pilih kartu lalu sentuh petak. Sentuh matahari untuk mengumpulkan energi.",
+                          font_size="10sp",color=(.75,.88,.77,1))
+        tools.add_widget(self.status)
+        root.add_widget(tools)
+        self.board=PixelBoard(self,size_hint_y=1)
         root.add_widget(self.board)
+        self.overlay=Label(text="",markup=True,font_size="22sp",
+                           color=(.88,1,.71,1),size_hint_y=None,height=dp(28))
+        root.add_widget(self.overlay)
+        self.game_screen.add_widget(root)
+        self.sm.add_widget(self.game_screen)
 
-        self.status_label = Label(
-            text="Pilih unit lalu sentuh petak untuk menanam.",
-            size_hint_y=None, height=dp(25), font_size="11sp",
-            color=(.76,.87,.77,1),
-        )
-        root.add_widget(self.status_label)
-        Clock.schedule_interval(self.refresh_hud, .15)
-        self.choose_plant("pea")
-        return root
+    def make_codex(self):
+        s=Screen(name="codex")
+        root=BoxLayout(orientation="vertical",padding=dp(12),spacing=dp(7))
+        root.add_widget(Label(text="[b]ENSIKLOPEDIA TAMAN[/b]",markup=True,
+                              font_size="22sp",size_hint_y=None,height=dp(42)))
+        for k,d in PLANTS.items():
+            root.add_widget(Label(text="[b]{} — {} energi[/b] | {}".format(
+                d["name"],d["cost"],d["desc"]),markup=True,font_size="12sp",
+                halign="left",valign="middle"))
+        root.add_widget(Label(text="Zombie: Walker (normal), Runner (cepat), Brute (kuat), Helmet (berzirah).",
+                              font_size="12sp",halign="left"))
+        root.add_widget(self.button("KEMBALI",self.show_menu))
+        s.add_widget(root)
+        self.sm.add_widget(s)
 
-    def choose_plant(self, kind):
-        self.board.select_plant(kind)
-        for key, button in self.buttons.items():
-            button.opacity = 1.0 if key == kind else .72
-        descriptions = {
-            "pea": "Pea Shooter menembakkan proyektil hijau.",
-            "ice": "Ice Plant memperlambat zombie.",
-            "sun": "Sun Plant menghasilkan 25 energi berkala.",
-            "wall": "Wall Plant kuat dan menahan zombie lebih lama.",
+    def show_menu(self):
+        if not self.sm.has_screen("menu"):
+            return
+        screen=self.sm.get_screen("menu")
+        root=screen.children[0] if screen.children else None
+        if root is not None:
+            root.clear_widgets()
+            root.add_widget(Widget(size_hint_y=.12))
+            root.add_widget(Label(text="[b]PLANT DEFENSE[/b]",markup=True,
+                                  font_size="32sp",color=(.72,1,.57,1),
+                                  size_hint_y=None,height=dp(55)))
+            root.add_widget(Label(text="PIXEL GARDEN • OFFLINE STRATEGY",
+                                  font_size="12sp",color=(.65,.82,.68,1),
+                                  size_hint_y=None,height=dp(26)))
+            root.add_widget(Widget(size_hint_y=.05))
+            root.add_widget(self.button("PETUALANGAN",self.show_levels,(.16,.45,.23,1)))
+            root.add_widget(self.button("SURVIVAL",lambda:self.start_game("survival",1),(.14,.37,.48,1)))
+            root.add_widget(self.button("TANTANGAN",lambda:self.start_game("challenge",1),(.49,.33,.13,1)))
+            root.add_widget(self.button("ENSIKLOPEDIA UNIT",self.show_codex,(.29,.30,.20,1)))
+            root.add_widget(self.button("PENGATURAN",self.show_settings,(.25,.28,.27,1)))
+            root.add_widget(Label(text="Versi 0.3 • Dunia taman orisinal",
+                                  font_size="10sp",color=(.45,.60,.49,1),
+                                  size_hint_y=None,height=dp(24)))
+            root.add_widget(Widget(size_hint_y=.08))
+        self.sm.current="menu"
+
+    def show_levels(self):
+        screen=self.sm.get_screen("menu")
+        root=screen.children[0]
+        root.clear_widgets()
+        root.add_widget(Label(text="[b]PILIH TAHAP[/b]",markup=True,
+                              font_size="26sp",size_hint_y=None,height=dp(55)))
+        unlocked=int(self.progress.get("level",1))
+        for lv in range(1,7):
+            locked=lv>unlocked
+            b=self.button("LEVEL {} {}".format(lv,"• TERKUNCI" if locked else "• TERBUKA"),
+                          lambda n=lv:self.start_game("adventure",n),
+                          (.22,.30,.20,1) if locked else (.15,.43,.24,1))
+            b.disabled=locked
+            root.add_widget(b)
+        root.add_widget(self.button("KEMBALI",self.show_menu,(.35,.25,.20,1)))
+        self.sm.current="menu"
+
+    def show_codex(self):
+        self.sm.current="codex"
+
+    def show_settings(self):
+        screen=self.sm.get_screen("menu")
+        root=screen.children[0]
+        root.clear_widgets()
+        root.add_widget(Label(text="[b]PENGATURAN[/b]",markup=True,
+                              font_size="25sp",size_hint_y=None,height=dp(55)))
+        root.add_widget(Label(text="Plant Defense dimainkan offline. Progres tersimpan otomatis di perangkat.",
+                              font_size="14sp"))
+        root.add_widget(self.button("HAPUS PROGRES",self.clear_progress,(.48,.20,.17,1)))
+        root.add_widget(self.button("KEMBALI",self.show_menu))
+        self.sm.current="menu"
+
+    def clear_progress(self):
+        self.progress={"level":1,"best_survival":0,"sound":True}
+        self.save_progress()
+        self.show_menu()
+
+    def start_game(self,mode,level):
+        self.board.start(mode,level)
+        self.overlay.text=""
+        self.select_plant("sprout")
+        self.sm.current="game"
+        descriptions={
+            "adventure":"Petualangan • selesaikan gelombang untuk membuka tahap berikutnya.",
+            "survival":"Survival • bertahan selama mungkin.",
+            "challenge":"Tantangan • kalahkan 12 zombie dengan sumber daya terbatas."
         }
-        self.status_label.text = (
-            descriptions[kind] + " Biaya: " + str(COSTS[kind]) + "."
-        )
+        self.set_status(descriptions.get(mode,"Mulai bertahan!"))
 
-    def restart_game(self):
-        self.board.reset()
-        self.choose_plant(self.board.selected_plant)
-        self.status_label.text = "Kalahkan 25 zombie untuk menang."
+    def select_plant(self,k):
+        self.board.selected=k
+        self.board.shovel=False
+        for key,b in self.card_buttons.items():
+            b.opacity=1 if key==k else .72
+        self.set_status("{} • biaya {} energi".format(PLANTS[k]["name"],PLANTS[k]["cost"]))
 
-    def refresh_hud(self, _dt):
-        self.sun_label.text = "SUN {}".format(self.board.sun)
-        self.score_label.text = "KILLS {}/{}".format(
-            self.board.kills, WIN_KILLS
-        )
+    def toggle_shovel(self):
+        self.board.shovel=not self.board.shovel
+        self.set_status("Pilih tanaman yang akan dihapus." if self.board.shovel else "Sekop dibatalkan.")
 
-        if self.board.game_state == "won":
-            self.status_label.text = (
-                "YOU WIN! Semua zombie dikalahkan — tekan RESTART."
-            )
-        elif self.board.game_state == "lost":
-            self.status_label.text = (
-                "GAME OVER! Zombie menembus pertahanan — tekan RESTART."
-            )
-        elif self.board.sun < self.board.plant_cost(
-            self.board.selected_plant
-        ):
-            self.status_label.text = (
-                "Energi belum cukup. Tunggu energi atau kalahkan zombie."
-            )
+    def pause_game(self):
+        self.board.paused=not self.board.paused
+        self.overlay.text="[b]PAUSED[/b]" if self.board.paused else ""
+        self.set_status("Sentuh tombol jeda untuk melanjutkan." if self.board.paused else "Permainan dilanjutkan.")
+
+    def set_status(self,msg):
+        if hasattr(self,"status"):
+            self.status.text=msg
+
+    def refresh(self):
+        if not hasattr(self,"board"):
+            return
+        self.hud.text="SUN {}".format(self.board.sun)
+        goal="∞" if self.board.mode=="survival" else str(self.board.goal)
+        self.levelhud.text="{} • KILLS {}/{} • WAVE {}".format(
+            self.board.mode.upper(),self.board.kills,goal,self.board.wave)
+        for k,b in self.card_buttons.items():
+            b.disabled=self.board.sun<PLANTS[k]["cost"]
+            b.background_color=(*PLANTS[k]["color"][:3],1 if not b.disabled else .38)
+        if self.board.state=="won":
+            self.overlay.text="[b]LEVEL CLEAR![/b]"
+        elif self.board.state=="lost":
+            self.overlay.text="[b]GARDEN OVERRUN[/b] • MENU lalu coba lagi"
+        elif not self.board.paused:
+            self.overlay.text=""
+
+    def on_level_won(self,mode,level):
+        if mode=="adventure":
+            self.progress["level"]=max(
+                int(self.progress.get("level",1)),min(6,level+1))
+            self.save_progress()
+        elif mode=="survival":
+            self.progress["best_survival"]=max(
+                int(self.progress.get("best_survival",0)),self.board.kills)
+            self.save_progress()
+        self.set_status("Progres tersimpan. Kembali ke menu untuk memilih tahap berikutnya.")
 
 
 if __name__ == "__main__":
