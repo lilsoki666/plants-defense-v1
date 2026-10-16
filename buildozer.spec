@@ -1,9 +1,10 @@
+
 [app]
 
 title = Plant Defense
 package.name = plantdefense
 package.domain = org.plantdefense
-version = 0.1.6
+version = 0.2.0
 
 source.dir = .
 source.include_exts = py,kv,png,jpg,jpeg,atlas,json,wav,ogg,mp3,ttf
@@ -20,7 +21,6 @@ android.ndk = 25b
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 
-# Gunakan fork yang memuat perbaikan libthorvg
 p4a.fork = Krozark
 p4a.branch = upstream-contribution
 p4a.commit = 71dba8a
