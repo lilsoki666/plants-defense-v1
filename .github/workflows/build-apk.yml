@@ -19,6 +19,21 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@v4
 
+      # Pastikan Gradle benar-benar menggunakan Java 17.
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Verify Java version
+        run: |
+          set -eu
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          javac -version
+          java -version 2>&1 | grep -E 'version "17([.]|")'
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -26,7 +41,6 @@ jobs:
             git \
             zip \
             unzip \
-            openjdk-17-jdk \
             python3-pip \
             python3-venv \
             autoconf \
@@ -61,6 +75,10 @@ jobs:
 
           echo "=== Buildozer version ==="
           "$HOME/.local/bin/buildozer" --version
+
+          echo "=== Java used by build ==="
+          echo "$JAVA_HOME"
+          java -version
 
           echo "=== Python and Kivy requirements ==="
           grep '^requirements =' buildozer.spec
