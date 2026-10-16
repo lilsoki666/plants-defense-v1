@@ -20,18 +20,12 @@ android.ndk = 25b
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 
-# Gunakan recipe python-for-android yang sudah memperbaiki
-# masalah pemasangan wheel charset-normalizer pada Python 3.14.
-p4a.branch = develop
+# Gunakan fork yang memuat perbaikan libthorvg
+p4a.fork = Krozark
+p4a.branch = upstream-contribution
+p4a.commit = 71dba8a
 
 [buildozer]
 
 log_level = 2
 warn_on_root = 1
-
-p4a.fork = Krozark
-p4a.branch = upstream-contribution
-p4a.commit = 71dba8a
-
-# Gunakan python-for-android versi develop
-p4a.branch = develop
