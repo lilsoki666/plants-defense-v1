@@ -29,5 +29,9 @@ p4a.branch = develop
 log_level = 2
 warn_on_root = 1
 
+p4a.fork = Krozark
+p4a.branch = upstream-contribution
+p4a.commit = 71dba8a
+
 # Gunakan python-for-android versi develop
 p4a.branch = develop
