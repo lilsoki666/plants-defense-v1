@@ -218,13 +218,13 @@ class GameplayWidget(Widget):
         baris_acak = random.randint(0, 4)
         jenis_zombie = random.choice(list(DAFTAR_ZOMBIE.keys()))
         data_z = DAFTAR_ZOMBIE[jenis_zombie]
-        
+
         pos_y = self.grid_awal_y + (baris_acak * self.tinggi_kotak) + 5
         z_baru = ZombieInstance(data_z, baris_acak, pos=(1000, pos_y))
         self.add_widget(z_baru)
         self.daftar_zombie.append(z_baru)
 
-        def loop_utama(self, dt):
+    def loop_utama(self, dt):
         # Update projectiles
         for peluru in self.daftar_peluru[:]:
             try:
