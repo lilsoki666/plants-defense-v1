@@ -291,3 +291,92 @@ class GameplayWidget(Widget):
 
         # Update HUD (energy label already bound to poin_energi, but ensure it's refreshed)
         self.update_hud()
+
+
+# ==========================================
+# 5. APP AND SCREEN BOOTSTRAP (FIX STARTUP)
+# ==========================================
+class GameplayWidgetFixed(GameplayWidget):
+    """Adds plant firing while retaining the existing gameplay classes."""
+
+    def loop_utama(self, dt):
+        # Plants that can shoot fire at enemies in the same lane.
+        for tanaman in self.daftar_tanaman[:]:
+            if tanaman.tipe != "penembak":
+                continue
+            tanaman.waktu_aksi += dt
+            musuh_di_depan = any(
+                z.baris == tanaman.baris and z.x > tanaman.x
+                for z in self.daftar_zombie
+            )
+            if musuh_di_depan and tanaman.waktu_aksi >= 1.6:
+                peluru = PeluruSawitParabola(tanaman.baris)
+                peluru.pos = (tanaman.right - 2, tanaman.y + tanaman.height * 0.55)
+                self.add_widget(peluru)
+                self.daftar_peluru.append(peluru)
+                tanaman.waktu_aksi = 0
+        super().loop_utama(dt)
+
+
+class GameplayScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.arena = GameplayWidgetFixed()
+        self.add_widget(self.arena)
+        self._game_event = None
+        self._spawn_event = None
+        self._sun_event = None
+
+    def mulai_level(self, mode="survival"):
+        # Stop previous schedules before restarting; avoids duplicate game loops.
+        for event in (self._game_event, self._spawn_event, self._sun_event):
+            if event is not None:
+                event.cancel()
+        Clock.unschedule(self.arena.loop_utama)
+        Clock.unschedule(self.arena.spawn_zombie_wave)
+        Clock.unschedule(self.arena.drop_surya_langit)
+
+        # Remove entities from the previous run but preserve HUD and seed cards.
+        for entity in (self.arena.daftar_tanaman +
+                       self.arena.daftar_zombie +
+                       self.arena.daftar_peluru):
+            if entity.parent is self.arena:
+                self.arena.remove_widget(entity)
+        for child in self.arena.children[:]:
+            if isinstance(child, EnergiMatahari):
+                self.arena.remove_widget(child)
+
+        self.arena.daftar_tanaman = []
+        self.arena.daftar_zombie = []
+        self.arena.daftar_peluru = []
+        self.arena.mode_game = mode
+        self.arena.poin_energi = 150
+        self.arena.tanaman_terpilih = None
+        self.arena.update_hud()
+
+        # Use event handles so another start does not multiply update loops.
+        self._game_event = Clock.schedule_interval(self.arena.loop_utama, 1.0 / 30.0)
+        spawn_time = 4.0 if mode == "survival" else 2.5
+        self._spawn_event = Clock.schedule_interval(self.arena.spawn_zombie_wave, spawn_time)
+        self._sun_event = Clock.schedule_interval(self.arena.drop_surya_langit, 7.0)
+
+
+class PlantDefenseApp(App):
+    title = "Plant Defense: Nusantara"
+
+    def build(self):
+        # Landscape Android layout; Kivy manages actual screen dimensions.
+        from kivy.core.window import Window
+        Window.clearcolor = (0.035, 0.08, 0.055, 1)
+
+        self.manager = ScreenManager()
+        self.menu = MenuUtamaScreen(name="menu_utama")
+        self.game = GameplayScreen(name="game_play")
+        self.manager.add_widget(self.menu)
+        self.manager.add_widget(self.game)
+        self.manager.current = "menu_utama"
+        return self.manager
+
+
+if __name__ == "__main__":
+    PlantDefenseApp().run()
