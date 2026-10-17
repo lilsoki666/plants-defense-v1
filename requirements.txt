@@ -1,2 +1,1 @@
-# Intentionally empty. Android Python dependencies are defined in buildozer.spec.
-# Do not add unrelated third-party packages here.
+# Dependensi Android ditetapkan di buildozer.spec.
